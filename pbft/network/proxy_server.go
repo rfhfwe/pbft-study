@@ -1,15 +1,16 @@
 package network
 
 import (
-	"net/http"
-	"github.com/bigpicturelabs/consensusPBFT/pbft/consensus"
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"bytes"
+	"net/http"
+
+	"github.com/bigpicturelabs/consensusPBFT/pbft/consensus"
 )
 
 type Server struct {
-	url string
+	url  string
 	node *Node
 }
 
@@ -30,6 +31,7 @@ func (server *Server) Start() {
 	}
 }
 
+// 这个节点服务暴露出的接口有这些
 func (server *Server) setRoute() {
 	http.HandleFunc("/req", server.getReq)
 	http.HandleFunc("/preprepare", server.getPrePrepare)
@@ -95,5 +97,5 @@ func (server *Server) getReply(writer http.ResponseWriter, request *http.Request
 
 func send(url string, msg []byte) {
 	buff := bytes.NewBuffer(msg)
-	http.Post("http://" + url, "application/json", buff)
+	http.Post("http://"+url, "application/json", buff)
 }
