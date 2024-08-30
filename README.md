@@ -1,5 +1,7 @@
 # Sample implementation of various consensus algorithms
 
+学习 pbft 算法，原作者链接：https://github.com/bigpicturelabs/simple_pbft
+
 ## PBFT
 ### Architecture
 #### Overall behavior (4 peers)
@@ -27,6 +29,3 @@ In this sample implementation, there is no client. So, every node including the 
 
 ### Working Screenshot
 ![](./working-screenshot.png)
-
-## License
-Apache 2.0
