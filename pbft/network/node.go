@@ -85,6 +85,83 @@ func NewNode(nodeID string) *Node {
 	return node
 }
 
+// 启动消息调度器
+func (node *Node) dispatchMsg() {
+	for {
+		select {
+		case msg := <-node.MsgEntrance:
+			err := node.routeMsg(msg)
+			if err != nil {
+				fmt.Println(err)
+				// TODO: send err to ErrorChannel
+			}
+		case <-node.Alarm:
+			err := node.routeMsgWhenAlarmed()
+			if err != nil {
+				fmt.Println(err)
+				// TODO: send err to ErrorChannel
+			}
+		}
+	}
+}
+
+// 启动警报触发器
+func (node *Node) alarmToDispatcher() {
+	for {
+		time.Sleep(ResolvingTimeDuration)
+		node.Alarm <- true
+	}
+}
+
+// 启动消息解析程序
+func (node *Node) resolveMsg() {
+	for {
+		// Get buffered messages from the dispatcher.
+		msgs := <-node.MsgDelivery
+		switch msgs.(type) {
+		case []*consensus.RequestMsg:
+			errs := node.resolveRequestMsg(msgs.([]*consensus.RequestMsg))
+			if len(errs) != 0 {
+				for _, err := range errs {
+					fmt.Println(err)
+				}
+				// TODO: send err to ErrorChannel
+			}
+		case []*consensus.PrePrepareMsg:
+			errs := node.resolvePrePrepareMsg(msgs.([]*consensus.PrePrepareMsg))
+			if len(errs) != 0 {
+				for _, err := range errs {
+					fmt.Println(err)
+				}
+				// TODO: send err to ErrorChannel
+			}
+		case []*consensus.VoteMsg:
+			voteMsgs := msgs.([]*consensus.VoteMsg)
+			if len(voteMsgs) == 0 {
+				break
+			}
+
+			if voteMsgs[0].MsgType == consensus.PrepareMsg {
+				errs := node.resolvePrepareMsg(voteMsgs)
+				if len(errs) != 0 {
+					for _, err := range errs {
+						fmt.Println(err)
+					}
+					// TODO: send err to ErrorChannel
+				}
+			} else if voteMsgs[0].MsgType == consensus.CommitMsg {
+				errs := node.resolveCommitMsg(voteMsgs)
+				if len(errs) != 0 {
+					for _, err := range errs {
+						fmt.Println(err)
+					}
+					// TODO: send err to ErrorChannel
+				}
+			}
+		}
+	}
+}
+
 func (node *Node) Broadcast(msg interface{}, path string) map[string]error {
 	errorMap := make(map[string]error)
 
@@ -256,25 +333,6 @@ func (node *Node) createStateForNewConsensus() error {
 	return nil
 }
 
-func (node *Node) dispatchMsg() {
-	for {
-		select {
-		case msg := <-node.MsgEntrance:
-			err := node.routeMsg(msg)
-			if err != nil {
-				fmt.Println(err)
-				// TODO: send err to ErrorChannel
-			}
-		case <-node.Alarm:
-			err := node.routeMsgWhenAlarmed()
-			if err != nil {
-				fmt.Println(err)
-				// TODO: send err to ErrorChannel
-			}
-		}
-	}
-}
-
 func (node *Node) routeMsg(msg interface{}) []error {
 	switch msg.(type) {
 	case *consensus.RequestMsg:
@@ -391,61 +449,6 @@ func (node *Node) routeMsgWhenAlarmed() []error {
 	}
 
 	return nil
-}
-
-func (node *Node) resolveMsg() {
-	for {
-		// Get buffered messages from the dispatcher.
-		msgs := <-node.MsgDelivery
-		switch msgs.(type) {
-		case []*consensus.RequestMsg:
-			errs := node.resolveRequestMsg(msgs.([]*consensus.RequestMsg))
-			if len(errs) != 0 {
-				for _, err := range errs {
-					fmt.Println(err)
-				}
-				// TODO: send err to ErrorChannel
-			}
-		case []*consensus.PrePrepareMsg:
-			errs := node.resolvePrePrepareMsg(msgs.([]*consensus.PrePrepareMsg))
-			if len(errs) != 0 {
-				for _, err := range errs {
-					fmt.Println(err)
-				}
-				// TODO: send err to ErrorChannel
-			}
-		case []*consensus.VoteMsg:
-			voteMsgs := msgs.([]*consensus.VoteMsg)
-			if len(voteMsgs) == 0 {
-				break
-			}
-
-			if voteMsgs[0].MsgType == consensus.PrepareMsg {
-				errs := node.resolvePrepareMsg(voteMsgs)
-				if len(errs) != 0 {
-					for _, err := range errs {
-						fmt.Println(err)
-					}
-					// TODO: send err to ErrorChannel
-				}
-			} else if voteMsgs[0].MsgType == consensus.CommitMsg {
-				errs := node.resolveCommitMsg(voteMsgs)
-				if len(errs) != 0 {
-					for _, err := range errs {
-						fmt.Println(err)
-					}
-					// TODO: send err to ErrorChannel
-				}
-			}
-		}
-	}
-}
-
-func (node *Node) alarmToDispatcher() {
-	for {
-		time.Sleep(ResolvingTimeDuration)
-		node.Alarm <- true
-	}
 }
 
 func (node *Node) resolveRequestMsg(msgs []*consensus.RequestMsg) []error {

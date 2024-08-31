@@ -33,11 +33,11 @@ func (server *Server) Start() {
 
 // 这个节点服务暴露出的接口有这些
 func (server *Server) setRoute() {
-	http.HandleFunc("/req", server.getReq)
-	http.HandleFunc("/preprepare", server.getPrePrepare)
-	http.HandleFunc("/prepare", server.getPrepare)
-	http.HandleFunc("/commit", server.getCommit)
-	http.HandleFunc("/reply", server.getReply)
+	http.HandleFunc("/req", server.getReq)               // 接收客户端的请求信息
+	http.HandleFunc("/preprepare", server.getPrePrepare) // 接收预准备信息
+	http.HandleFunc("/prepare", server.getPrepare)       // 接收准备信息
+	http.HandleFunc("/commit", server.getCommit)         // 接收提交信息
+	http.HandleFunc("/reply", server.getReply)           // 向客户端返回结果
 }
 
 func (server *Server) getReq(writer http.ResponseWriter, request *http.Request) {
