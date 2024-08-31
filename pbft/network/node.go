@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bigpicturelabs/consensusPBFT/pbft/consensus"
+	"github.com/bigpicturelabsinc/consensusPBFT/pbft/consensus"
 )
 
 // node 节点的结构
@@ -89,7 +89,7 @@ func NewNode(nodeID string) *Node {
 func (node *Node) dispatchMsg() {
 	for {
 		select {
-		case msg := <-node.MsgEntrance:
+		case msg := <-node.MsgEntrance: // 接收到来自客户端或其他节点的消息后
 			err := node.routeMsg(msg)
 			if err != nil {
 				fmt.Println(err)
@@ -108,13 +108,14 @@ func (node *Node) dispatchMsg() {
 // 启动警报触发器
 func (node *Node) alarmToDispatcher() {
 	for {
-		time.Sleep(ResolvingTimeDuration)
+		time.Sleep(ResolvingTimeDuration) // 每1s都检查一次所有的发送情况，有则发送
 		node.Alarm <- true
 	}
 }
 
 // 启动消息解析程序
 func (node *Node) resolveMsg() {
+	// 这里面应该就是集中负责把消息投递出去了
 	for {
 		// Get buffered messages from the dispatcher.
 		msgs := <-node.MsgDelivery
@@ -160,6 +161,86 @@ func (node *Node) resolveMsg() {
 			}
 		}
 	}
+}
+
+// 处理接收到的消息
+func (node *Node) routeMsg(msg interface{}) []error {
+	switch msg.(type) {
+	case *consensus.RequestMsg: // 来自客户端的消息
+		if node.CurrentState == nil {
+			// 这段的意思是把当前的存的消息全部发送出去【应该是转发给主节点？】，并置空
+			// Copy buffered messages first.
+			msgs := make([]*consensus.RequestMsg, len(node.MsgBuffer.ReqMsgs))
+			copy(msgs, node.MsgBuffer.ReqMsgs)
+
+			// Append a newly arrived message.
+			msgs = append(msgs, msg.(*consensus.RequestMsg))
+
+			// Empty the buffer.
+			node.MsgBuffer.ReqMsgs = make([]*consensus.RequestMsg, 0)
+
+			// Send messages.
+			node.MsgDelivery <- msgs
+		} else {
+			node.MsgBuffer.ReqMsgs = append(node.MsgBuffer.ReqMsgs, msg.(*consensus.RequestMsg)) // 这个应该就是要转发了
+		}
+	case *consensus.PrePrepareMsg: // 预准备消息
+		if node.CurrentState == nil {
+			// 依然是转发出去
+			// Copy buffered messages first.
+			msgs := make([]*consensus.PrePrepareMsg, len(node.MsgBuffer.PrePrepareMsgs))
+			copy(msgs, node.MsgBuffer.PrePrepareMsgs)
+
+			// Append a newly arrived message.
+			msgs = append(msgs, msg.(*consensus.PrePrepareMsg))
+
+			// Empty the buffer.
+			node.MsgBuffer.PrePrepareMsgs = make([]*consensus.PrePrepareMsg, 0)
+
+			// Send messages.
+			node.MsgDelivery <- msgs
+		} else {
+			node.MsgBuffer.PrePrepareMsgs = append(node.MsgBuffer.PrePrepareMsgs, msg.(*consensus.PrePrepareMsg))
+		}
+	case *consensus.VoteMsg: // 投票消息，包括准备消息和投票消息两种，合并到一起了
+		if msg.(*consensus.VoteMsg).MsgType == consensus.PrepareMsg {
+			if node.CurrentState == nil || node.CurrentState.CurrentStage != consensus.PrePrepared {
+				node.MsgBuffer.PrepareMsgs = append(node.MsgBuffer.PrepareMsgs, msg.(*consensus.VoteMsg))
+			} else {
+				// Copy buffered messages first.
+				msgs := make([]*consensus.VoteMsg, len(node.MsgBuffer.PrepareMsgs))
+				copy(msgs, node.MsgBuffer.PrepareMsgs)
+
+				// Append a newly arrived message.
+				msgs = append(msgs, msg.(*consensus.VoteMsg))
+
+				// Empty the buffer.
+				node.MsgBuffer.PrepareMsgs = make([]*consensus.VoteMsg, 0)
+
+				// Send messages.
+				node.MsgDelivery <- msgs
+			}
+		} else if msg.(*consensus.VoteMsg).MsgType == consensus.CommitMsg {
+			if node.CurrentState == nil || node.CurrentState.CurrentStage != consensus.Prepared {
+				node.MsgBuffer.CommitMsgs = append(node.MsgBuffer.CommitMsgs, msg.(*consensus.VoteMsg))
+			} else {
+				// Copy buffered messages first.
+				msgs := make([]*consensus.VoteMsg, len(node.MsgBuffer.CommitMsgs))
+				copy(msgs, node.MsgBuffer.CommitMsgs)
+
+				// Append a newly arrived message.
+				msgs = append(msgs, msg.(*consensus.VoteMsg))
+
+				// Empty the buffer.
+				node.MsgBuffer.CommitMsgs = make([]*consensus.VoteMsg, 0)
+
+				// Send messages.
+				node.MsgDelivery <- msgs
+			}
+		}
+	}
+
+	return nil
 }
 
 func (node *Node) Broadcast(msg interface{}, path string) map[string]error {
@@ -312,7 +393,7 @@ func (node *Node) GetReply(msg *consensus.ReplyMsg) {
 }
 
 func (node *Node) createStateForNewConsensus() error {
-	// Check if there is an ongoing consensus process.
+	// 检查是否有正在进行的共识过程
 	if node.CurrentState != nil {
 		return errors.New("another consensus is ongoing")
 	}
@@ -329,83 +410,6 @@ func (node *Node) createStateForNewConsensus() error {
 	node.CurrentState = consensus.CreateState(node.View.ID, lastSequenceID)
 
 	LogStage("Create the replica status", true)
-
-	return nil
-}
-
-func (node *Node) routeMsg(msg interface{}) []error {
-	switch msg.(type) {
-	case *consensus.RequestMsg:
-		if node.CurrentState == nil {
-			// Copy buffered messages first.
-			msgs := make([]*consensus.RequestMsg, len(node.MsgBuffer.ReqMsgs))
-			copy(msgs, node.MsgBuffer.ReqMsgs)
-
-			// Append a newly arrived message.
-			msgs = append(msgs, msg.(*consensus.RequestMsg))
-
-			// Empty the buffer.
-			node.MsgBuffer.ReqMsgs = make([]*consensus.RequestMsg, 0)
-
-			// Send messages.
-			node.MsgDelivery <- msgs
-		} else {
-			node.MsgBuffer.ReqMsgs = append(node.MsgBuffer.ReqMsgs, msg.(*consensus.RequestMsg))
-		}
-	case *consensus.PrePrepareMsg:
-		if node.CurrentState == nil {
-			// Copy buffered messages first.
-			msgs := make([]*consensus.PrePrepareMsg, len(node.MsgBuffer.PrePrepareMsgs))
-			copy(msgs, node.MsgBuffer.PrePrepareMsgs)
-
-			// Append a newly arrived message.
-			msgs = append(msgs, msg.(*consensus.PrePrepareMsg))
-
-			// Empty the buffer.
-			node.MsgBuffer.PrePrepareMsgs = make([]*consensus.PrePrepareMsg, 0)
-
-			// Send messages.
-			node.MsgDelivery <- msgs
-		} else {
-			node.MsgBuffer.PrePrepareMsgs = append(node.MsgBuffer.PrePrepareMsgs, msg.(*consensus.PrePrepareMsg))
-		}
-	case *consensus.VoteMsg:
-		if msg.(*consensus.VoteMsg).MsgType == consensus.PrepareMsg {
-			if node.CurrentState == nil || node.CurrentState.CurrentStage != consensus.PrePrepared {
-				node.MsgBuffer.PrepareMsgs = append(node.MsgBuffer.PrepareMsgs, msg.(*consensus.VoteMsg))
-			} else {
-				// Copy buffered messages first.
-				msgs := make([]*consensus.VoteMsg, len(node.MsgBuffer.PrepareMsgs))
-				copy(msgs, node.MsgBuffer.PrepareMsgs)
-
-				// Append a newly arrived message.
-				msgs = append(msgs, msg.(*consensus.VoteMsg))
-
-				// Empty the buffer.
-				node.MsgBuffer.PrepareMsgs = make([]*consensus.VoteMsg, 0)
-
-				// Send messages.
-				node.MsgDelivery <- msgs
-			}
-		} else if msg.(*consensus.VoteMsg).MsgType == consensus.CommitMsg {
-			if node.CurrentState == nil || node.CurrentState.CurrentStage != consensus.Prepared {
-				node.MsgBuffer.CommitMsgs = append(node.MsgBuffer.CommitMsgs, msg.(*consensus.VoteMsg))
-			} else {
-				// Copy buffered messages first.
-				msgs := make([]*consensus.VoteMsg, len(node.MsgBuffer.CommitMsgs))
-				copy(msgs, node.MsgBuffer.CommitMsgs)
-
-				// Append a newly arrived message.
-				msgs = append(msgs, msg.(*consensus.VoteMsg))
-
-				// Empty the buffer.
-				node.MsgBuffer.CommitMsgs = make([]*consensus.VoteMsg, 0)
-
-				// Send messages.
-				node.MsgDelivery <- msgs
-			}
-		}
-	}
 
 	return nil
 }
